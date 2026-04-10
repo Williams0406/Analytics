@@ -73,6 +73,11 @@ export default function AIInsightsPage() {
         body: JSON.stringify({ question: q || null }),
       })
 
+      if (!response.ok || !response.body) {
+        const errorText = await response.text().catch(() => '')
+        throw new Error(errorText || `HTTP ${response.status}`)
+      }
+
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
 
@@ -89,6 +94,9 @@ export default function AIInsightsPage() {
             const parsed = JSON.parse(line.replace('data: ', ''))
             if (parsed.token) {
               setStreamText((prev) => prev + parsed.token)
+            }
+            if (parsed.error) {
+              setStreamText(`AI Insights devolvio un error: ${parsed.error}`)
             }
             if (parsed.done) {
               await fetchInsights()

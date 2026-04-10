@@ -5,12 +5,11 @@ from rest_framework import generics, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from decouple import config
 
 from apps.analytics.models import MetricSnapshot, RevenueTimeSeries
 from apps.datasets.analysis_summary import get_dataset_analysis_summary, get_latest_ready_dataset_import
 
-from .ai_service import get_ai_response, get_ai_stream
+from .ai_service import get_ai_provider_and_model, get_ai_response, get_ai_stream
 from .models import AIInsight
 from .serializers import AIInsightSerializer
 
@@ -358,8 +357,7 @@ def stream_insight(request):
     context = build_analysis_context(request.user, question)
     prompt = build_ai_prompt(context, question)
 
-    provider = config('AI_PROVIDER', default='ollama')
-    model = config('OLLAMA_MODEL', default='llama3.2')
+    provider, model = get_ai_provider_and_model()
 
     def event_stream():
         full_content = ''

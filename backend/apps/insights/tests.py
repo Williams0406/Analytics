@@ -1,9 +1,11 @@
+from django.test import SimpleTestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.datasets.schema_inference import import_dataset_bundle
 from apps.users.models import LumiqUser
 
+from .ai_service import get_ai_provider_and_model
 from .views import build_ai_prompt, build_dataset_context
 
 
@@ -40,3 +42,12 @@ class SingleDatasetInsightsContextTests(TestCase):
         self.assertIn('discount', prompt)
         self.assertIn('Riesgos de calidad', prompt)
         self.assertIn('Campos a priorizar', prompt)
+
+
+class AIServiceConfigTests(SimpleTestCase):
+    @override_settings(AI_PROVIDER='groq', GROQ_MODEL='llama-3.3-70b-versatile')
+    def test_groq_provider_uses_groq_model_setting(self):
+        provider, model = get_ai_provider_and_model()
+
+        self.assertEqual(provider, 'groq')
+        self.assertEqual(model, 'llama-3.3-70b-versatile')
