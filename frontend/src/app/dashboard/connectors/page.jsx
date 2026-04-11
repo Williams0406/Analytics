@@ -4,7 +4,6 @@ import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowRight, FileUp, RefreshCw, Sparkles, Trash2 } from 'lucide-react'
 
-import ConnectorCard from '@/components/connectors/ConnectorCard'
 import Navbar from '@/components/layout/Navbar'
 import apiClient from '@/lib/axios'
 import Badge from '@/components/ui/Badge'
@@ -428,55 +427,6 @@ export default function ConnectorsPage() {
               </CardContent>
             </Card>
           </div>
-        </section>
-
-        {connected.length > 0 && (
-          <section className="mb-8">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">
-                Conectados
-              </h3>
-              <Badge variant="success">{connected.length}</Badge>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {connected.map((connector) => (
-                <ConnectorCard
-                  key={connector.type}
-                  connector={connector}
-                  onConnect={fetchData}
-                  onSync={fetchData}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        <section>
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">
-              Todos los conectores
-            </h3>
-            <Badge variant="neutral">{available.length}</Badge>
-          </div>
-
-          {loading ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {Array(8).fill(0).map((_, index) => (
-                <Skeleton key={index} className="h-40 rounded-[var(--radius-lg)]" />
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              {available.map((connector) => (
-                <ConnectorCard
-                  key={connector.type}
-                  connector={connector}
-                  onConnect={fetchData}
-                  onSync={fetchData}
-                />
-              ))}
-            </div>
-          )}
         </section>
       </main>
     </>

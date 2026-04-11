@@ -53,18 +53,6 @@ export default function Navbar({ title = 'Dashboard' }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          className="hidden min-w-[320px] items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-subtle)] px-4 py-3 text-left text-sm text-[var(--text-secondary)] transition-all duration-[var(--motion-fast)] hover:border-[var(--border-strong)] hover:bg-white xl:inline-flex"
-        >
-          <Search size={15} />
-          <span className="flex-1">Buscar vistas, datasets o acciones...</span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-white px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            <Command size={10} />
-            K
-          </span>
-        </button>
-
         <div className="flex items-center gap-3">
           {user?.company ? (
             <Badge variant="info" className="hidden lg:inline-flex">

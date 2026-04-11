@@ -2,8 +2,9 @@
 
 import Badge from '@/components/ui/Badge'
 import { Card, CardContent } from '@/components/ui/Card'
+import { normalizePresentationSlides } from '@/components/analytics/presentationUtils'
 
-export default function InsightCard({ insight }) {
+export default function InsightCard({ insight, onClick, isActive = false }) {
   const priorityConfig = {
     high: { label: 'Alta', variant: 'danger' },
     medium: { label: 'Media', variant: 'warning' },
@@ -19,19 +20,23 @@ export default function InsightCard({ insight }) {
   }
 
   const priority = priorityConfig[insight.priority] || priorityConfig.medium
+  const slidesCount = normalizePresentationSlides(insight.presentation?.slides || []).length
 
-  return (
+  const cardNode = (
     <Card
-      className={`transition-all duration-[var(--motion-fast)] hover:-translate-y-0.5 hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md)] ${
+      className={`w-full text-left transition-all duration-[var(--motion-fast)] hover:-translate-y-0.5 hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md)] ${
         insight.is_read ? 'opacity-80' : ''
-      }`}
+      } ${isActive ? 'border-[var(--accent-indigo)] shadow-[var(--shadow-md)]' : ''}`}
     >
       <CardContent className="px-5 py-5">
         <div className="mb-3 flex items-start justify-between gap-3">
           <span className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
             {typeLabels[insight.insight_type] || insight.insight_type_display}
           </span>
-          <Badge variant={priority.variant}>{priority.label}</Badge>
+          <div className="flex items-center gap-2">
+            {slidesCount ? <Badge variant="info">{slidesCount} slides</Badge> : null}
+            <Badge variant={priority.variant}>{priority.label}</Badge>
+          </div>
         </div>
 
         <h3 className="mb-2 text-sm font-semibold leading-snug text-[var(--text-primary)]">
@@ -47,5 +52,15 @@ export default function InsightCard({ insight }) {
         </p>
       </CardContent>
     </Card>
+  )
+
+  if (!onClick) {
+    return cardNode
+  }
+
+  return (
+    <button type="button" onClick={onClick} className="w-full">
+      {cardNode}
+    </button>
   )
 }

@@ -1,4 +1,5 @@
 import { IBM_Plex_Mono, Manrope } from 'next/font/google'
+import Script from 'next/script'
 import './globals.css'
 
 const manrope = Manrope({
@@ -22,6 +23,22 @@ export default function RootLayout({ children }) {
   return (
     <html lang="es">
       <body className={`${manrope.variable} ${ibmPlexMono.variable}`}>
+        <Script id="mathjax-config" strategy="afterInteractive">
+          {`window.MathJax = {
+            tex: {
+              inlineMath: [['\\\\(', '\\\\)']],
+              displayMath: [['\\\\[', '\\\\]'], ['$$', '$$']]
+            },
+            svg: {
+              fontCache: 'global'
+            }
+          };`}
+        </Script>
+        <Script
+          id="mathjax-script"
+          strategy="afterInteractive"
+          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"
+        />
         {children}
       </body>
     </html>

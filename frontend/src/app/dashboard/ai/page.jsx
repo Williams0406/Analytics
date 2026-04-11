@@ -1,9 +1,11 @@
 'use client'
 
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { Database, RefreshCw, Send, Sparkles } from 'lucide-react'
+import { Database, Send, Sparkles, Trash2 } from 'lucide-react'
 
-import InsightCard from '@/components/insights/InsightCard'
+import PresentationDeck from '@/components/analytics/PresentationDeck'
+import { normalizePresentationSlides } from '@/components/analytics/presentationUtils'
 import Navbar from '@/components/layout/Navbar'
 import apiClient from '@/lib/axios'
 import { getAccessToken } from '@/lib/auth'
@@ -22,43 +24,69 @@ const QUICK_QUESTIONS = [
   'Que metricas o series temporales puedo explotar desde esta base?',
 ]
 
+function resolveLatestInsight(payload) {
+  const insights = Array.isArray(payload) ? payload : payload?.results || []
+  return (
+    insights.find((item) => normalizePresentationSlides(item?.presentation?.slides || []).length > 0)
+    || insights[0]
+    || null
+  )
+}
+
 export default function AIInsightsPage() {
-  const [insights, setInsights] = useState([])
+  const [currentInsight, setCurrentInsight] = useState(null)
   const [dashboard, setDashboard] = useState(null)
-  const [streamText, setStreamText] = useState('')
+  const [statusText, setStatusText] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(true)
+  const [deletingCurrent, setDeletingCurrent] = useState(false)
 
-  const fetchInsights = async () => {
+  const fetchLatestInsight = async () => {
     try {
       const { data } = await apiClient.get('/api/insights/')
-      setInsights(Array.isArray(data) ? data : data.results || [])
+      setCurrentInsight(resolveLatestInsight(data))
     } catch (err) {
       console.error(err)
-    } finally {
-      setLoading(false)
     }
   }
 
-  const fetchDashboardContext = async () => {
-    try {
-      const { data } = await apiClient.get('/api/analytics/dashboard/')
-      setDashboard(data)
-    } catch (err) {
-      console.error(err)
+  const fetchInitialState = async () => {
+    setLoading(true)
+
+    const [dashboardResult, insightsResult] = await Promise.allSettled([
+      apiClient.get('/api/analytics/dashboard/'),
+      apiClient.get('/api/insights/'),
+    ])
+
+    if (dashboardResult.status === 'fulfilled') {
+      setDashboard(dashboardResult.value.data)
+    } else {
+      console.error(dashboardResult.reason)
     }
+
+    if (insightsResult.status === 'fulfilled') {
+      setCurrentInsight(resolveLatestInsight(insightsResult.value.data))
+    } else {
+      console.error(insightsResult.reason)
+    }
+
+    setLoading(false)
   }
 
   useEffect(() => {
-    fetchInsights()
-    fetchDashboardContext()
+    fetchInitialState()
   }, [])
+
+  const activeSlides = currentInsight?.presentation?.slides || []
+  const activeSlidesCount = normalizePresentationSlides(activeSlides).length
 
   const handleStream = async (customQuestion = null) => {
     const q = customQuestion || question
+    if (!q?.trim()) return
+
     setStreaming(true)
-    setStreamText('')
+    setStatusText('Interpretando tu pregunta...')
 
     try {
       const token = getAccessToken()
@@ -80,35 +108,59 @@ export default function AIInsightsPage() {
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
+      let buffer = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        buffer += decoder.decode(value, { stream: true })
+        const events = buffer.split('\n\n')
+        buffer = events.pop() || ''
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
+        for (const eventChunk of events) {
+          const dataLine = eventChunk
+            .split('\n')
+            .find((line) => line.startsWith('data: '))
+          if (!dataLine) continue
           try {
-            const parsed = JSON.parse(line.replace('data: ', ''))
-            if (parsed.token) {
-              setStreamText((prev) => prev + parsed.token)
+            const parsed = JSON.parse(dataLine.replace('data: ', ''))
+            if (parsed.status) {
+              setStatusText(parsed.status)
             }
             if (parsed.error) {
-              setStreamText(`AI Insights devolvio un error: ${parsed.error}`)
+              setStatusText(`AI Insights devolvio un error: ${parsed.error}`)
             }
-            if (parsed.done) {
-              await fetchInsights()
+            if (parsed.insight) {
+              setCurrentInsight(parsed.insight)
+              setStatusText(parsed.insight.content || 'Presentacion lista.')
             }
           } catch {}
         }
       }
     } catch (err) {
-      setStreamText('No pude conectar con el motor de AI Insights. Revisa tu proveedor configurado.')
+      setStatusText('No pude conectar con el motor de AI Insights. Revisa tu proveedor configurado.')
     } finally {
       setStreaming(false)
       setQuestion('')
+    }
+  }
+
+  const handleDeleteCurrentInsight = async () => {
+    if (!currentInsight?.id) return
+    if (!window.confirm('Esta accion eliminara la presentacion activa de AI Insights.')) {
+      return
+    }
+
+    setDeletingCurrent(true)
+    try {
+      await apiClient.delete(`/api/insights/${currentInsight.id}/`)
+      setStatusText('')
+      await fetchLatestInsight()
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setDeletingCurrent(false)
     }
   }
 
@@ -120,15 +172,16 @@ export default function AIInsightsPage() {
           eyebrow="Analisis Asistido"
           icon={Sparkles}
           title="AI Insights"
-          description="Haz preguntas sobre el dataset cargado en Conectores: columnas clave, calidad del dato, relaciones y metricas detectadas."
+          description="Haz preguntas sobre el dataset cargado y recibe una lectura visual en slides, adaptada al nivel de detalle que necesites."
           actions={
-            <button
-              onClick={fetchInsights}
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-white px-4 text-sm font-medium text-[var(--text-primary)] transition-all duration-[var(--motion-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-subtle)]"
-            >
-              <RefreshCw size={14} />
-              Actualizar historial
-            </button>
+            <>
+              <Link
+                href="/dashboard/ai/history"
+                className="inline-flex h-11 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-white px-4 text-sm font-medium text-[var(--text-primary)] transition-all duration-[var(--motion-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-subtle)]"
+              >
+                Ver historial
+              </Link>
+            </>
           }
           meta={
             <Card className="min-w-[300px] shadow-[var(--shadow-sm)]">
@@ -163,67 +216,76 @@ export default function AIInsightsPage() {
 
         <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.55fr)_380px]">
           <div className="space-y-4">
-            <Card className="min-h-60 shadow-[var(--shadow-md)]">
+            <Card className="shadow-[var(--shadow-md)]">
               <CardContent className="px-5 py-5">
                 <div className="mb-4 flex items-center gap-2">
                   <div className="flex h-8 w-8 items-center justify-center rounded-2xl bg-[var(--surface-dark)] text-white">
                     <Sparkles size={14} />
                   </div>
-                  <span className="text-sm font-semibold text-[var(--text-primary)]">Respuesta en vivo</span>
-                  <div className="ml-auto">
+                  <span className="text-sm font-semibold text-[var(--text-primary)]">Respuesta en diapositivas</span>
+                  <div className="ml-auto flex items-center gap-2">
+                    {activeSlidesCount ? (
+                      <Badge variant="info">{activeSlidesCount} slides</Badge>
+                    ) : null}
                     <Badge variant={streaming ? 'info' : 'neutral'}>
-                      {streaming ? 'Analizando...' : 'En espera'}
+                      {streaming ? 'Actualizando...' : currentInsight ? 'Ultima respuesta' : 'Sin presentacion'}
                     </Badge>
                   </div>
                 </div>
 
-                {streamText ? (
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--text-secondary)]">
-                    {streamText}
-                    {streaming ? (
-                      <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded bg-[var(--accent-indigo)]" />
-                    ) : null}
+                {statusText ? (
+                  <div className="mb-4 rounded-[var(--radius-md)] border border-[rgba(50,88,255,0.14)] bg-[rgba(50,88,255,0.05)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    {statusText}
                   </div>
+                ) : null}
+
+                {loading ? (
+                  <div className="space-y-4">
+                    <Skeleton className="h-16 rounded-[var(--radius-lg)]" />
+                    <Skeleton className="h-[420px] rounded-[var(--radius-lg)]" />
+                  </div>
+                ) : activeSlides.length ? (
+                  <>
+                    {currentInsight ? (
+                      <div className="mb-4 flex flex-wrap items-start justify-between gap-4 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-4">
+                        <div className="min-w-0">
+                          <p className="text-xs uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                            {new Date(currentInsight.created_at).toLocaleString('es-PE')}
+                          </p>
+                          <h2 className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+                            {currentInsight.title}
+                          </h2>
+                          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
+                            {currentInsight.content}
+                          </p>
+                        </div>
+
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={handleDeleteCurrentInsight}
+                          disabled={deletingCurrent}
+                          className="shrink-0"
+                        >
+                          <Trash2 size={14} />
+                          {deletingCurrent ? 'Eliminando...' : 'Eliminar'}
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    <PresentationDeck slides={activeSlides} />
+                  </>
                 ) : (
                   <EmptyState
                     icon={Sparkles}
-                    title="Todavia no hay una lectura activa"
+                    title="Todavia no hay una presentacion activa"
                     description={
                       streaming
-                        ? 'Generando una lectura del dataset en tiempo real.'
-                        : 'Las respuestas apareceran aqui mientras el motor explora tu dataset.'
+                        ? 'La IA esta preparando una respuesta visual para tu pregunta.'
+                        : 'La ultima respuesta generada aparecera aqui automaticamente. Si aun no hiciste una consulta, usa el panel lateral para crear la primera.'
                     }
                   />
                 )}
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-[var(--shadow-md)]">
-              <CardContent className="px-5 py-5">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className="text-sm font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">
-                    Historial
-                  </h3>
-                  <Badge variant="neutral">{insights.length}</Badge>
-                </div>
-
-                <div className="max-h-[720px] space-y-3 overflow-y-auto pr-1">
-                  {loading ? (
-                    Array(3).fill(0).map((_, index) => (
-                      <Skeleton key={index} className="h-36 rounded-[var(--radius-lg)]" />
-                    ))
-                  ) : insights.length === 0 ? (
-                    <EmptyState
-                      icon={Sparkles}
-                      title="Aun no hay insights generados"
-                      description="Haz tu primera pregunta para activar el historial de respuestas."
-                    />
-                  ) : (
-                    insights.map((insight) => (
-                      <InsightCard key={insight.id} insight={insight} />
-                    ))
-                  )}
-                </div>
               </CardContent>
             </Card>
           </div>
@@ -244,14 +306,14 @@ export default function AIInsightsPage() {
                       handleStream()
                     }
                   }}
-                  placeholder="Escribe aqui tu pregunta sobre tablas, campos, metricas, calidad o relaciones..."
+                  placeholder="Pregunta por tablas, campos, metricas, relaciones o incluso formulas..."
                   disabled={streaming}
                   rows={8}
                 />
 
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <p className="text-[11px] text-[var(--text-muted)]">Usa Ctrl + Enter para enviar mas rapido.</p>
-                  <Badge variant="neutral">Prompt</Badge>
+                  <Badge variant="neutral">Slides adaptativas</Badge>
                 </div>
 
                 <Button
@@ -260,7 +322,7 @@ export default function AIInsightsPage() {
                   className="mt-4 w-full"
                 >
                   <Send size={15} />
-                  {streaming ? 'Analizando...' : 'Enviar prompt'}
+                  {streaming ? 'Construyendo presentacion...' : 'Generar respuesta'}
                 </Button>
               </CardContent>
             </Card>
@@ -295,7 +357,7 @@ export default function AIInsightsPage() {
                   <div className="space-y-3">
                     {dashboard.insights.slice(0, 4).map((insight, index) => (
                       <div
-                        key={insight}
+                        key={`${index}-${insight}`}
                         className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-muted)] px-4 py-3 text-sm text-[var(--text-secondary)]"
                         style={{ boxShadow: `inset 3px 0 0 ${['#3258ff', '#0ea5a4', '#f46d43', '#8b5cf6'][index % 4]}` }}
                       >

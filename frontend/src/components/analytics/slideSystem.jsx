@@ -70,6 +70,7 @@ export function SlideCanvas({
   surfaceClassName = '',
 }) {
   const hostRef = useRef(null)
+  const frameRef = useRef(null)
   const [renderWidth, setRenderWidth] = useState(SLIDE_WIDTH)
 
   useEffect(() => {
@@ -77,20 +78,43 @@ export function SlideCanvas({
     if (!host) return undefined
 
     const updateSize = () => {
-      const nextWidth = Math.max(320, Math.min(host.clientWidth || SLIDE_WIDTH, SLIDE_WIDTH))
-      setRenderWidth(nextWidth)
+      const measuredWidth = Math.round(host.clientWidth || SLIDE_WIDTH)
+      const nextWidth = Math.max(320, Math.min(measuredWidth, SLIDE_WIDTH))
+      setRenderWidth((currentWidth) => (
+        Math.abs(currentWidth - nextWidth) >= 1 ? nextWidth : currentWidth
+      ))
+    }
+
+    const scheduleUpdate = () => {
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current)
+      }
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null
+        updateSize()
+      })
     }
 
     updateSize()
 
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateSize)
-      return () => window.removeEventListener('resize', updateSize)
+      window.addEventListener('resize', scheduleUpdate)
+      return () => {
+        window.removeEventListener('resize', scheduleUpdate)
+        if (frameRef.current) {
+          cancelAnimationFrame(frameRef.current)
+        }
+      }
     }
 
-    const observer = new ResizeObserver(updateSize)
+    const observer = new ResizeObserver(scheduleUpdate)
     observer.observe(host)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current)
+      }
+    }
   }, [])
 
   const scale = renderWidth / SLIDE_WIDTH

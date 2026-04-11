@@ -124,3 +124,113 @@ samp {
   color: var(--text-muted);
   opacity: 1;
 }
+
+.md-content {
+  color: inherit;
+}
+
+.md-content a {
+  color: var(--accent-indigo);
+  text-decoration: underline;
+  text-decoration-color: rgba(50, 88, 255, 0.28);
+  text-underline-offset: 0.18em;
+}
+
+.md-content p + p,
+.md-content p + ul,
+.md-content p + ol,
+.md-content p + blockquote,
+.md-content ul + p,
+.md-content ol + p,
+.md-content blockquote + p,
+.md-content pre + p,
+.md-content .math-block + p {
+  margin-top: 0.8em;
+}
+
+.md-content ul,
+.md-content ol {
+  margin: 0.75em 0 0.75em 1.25em;
+  padding: 0;
+}
+
+.md-content li + li {
+  margin-top: 0.35em;
+}
+
+.md-content blockquote {
+  margin: 0.9em 0;
+  border-left: 3px solid rgba(50, 88, 255, 0.25);
+  padding-left: 0.85em;
+  color: var(--text-secondary);
+}
+
+.md-content code {
+  border: 1px solid rgba(22, 32, 43, 0.08);
+  border-radius: 0.55rem;
+  background: rgba(22, 32, 43, 0.06);
+  padding: 0.12rem 0.38rem;
+  font-size: 0.92em;
+}
+
+.md-content pre {
+  overflow-x: auto;
+  border: 1px solid rgba(22, 32, 43, 0.08);
+  border-radius: 1rem;
+  background: #0f1720;
+  padding: 1rem 1.1rem;
+  color: #f8fafc;
+}
+
+.md-content pre code {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.md-content strong {
+  font-weight: 700;
+}
+
+.md-content em {
+  font-style: italic;
+}
+
+.md-content h1,
+.md-content h2,
+.md-content h3 {
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.08;
+}
+
+.md-content h1 {
+  font-size: 1.85em;
+}
+
+.md-content h2 {
+  font-size: 1.45em;
+}
+
+.md-content h3 {
+  font-size: 1.2em;
+}
+
+.md-inline > * {
+  display: inline;
+}
+
+.math-inline {
+  white-space: nowrap;
+}
+
+.math-block {
+  margin: 0.9em 0;
+  overflow-x: auto;
+}
+
+.md-content mjx-container {
+  max-width: 100%;
+  overflow-x: auto;
+}

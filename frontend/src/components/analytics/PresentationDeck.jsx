@@ -14,12 +14,14 @@ import {
 } from 'recharts'
 
 import AnalyticsChartSlide from '@/components/analytics/AnalyticsChartSlide'
+import { normalizePresentationSlides } from '@/components/analytics/presentationUtils'
 import {
   CHART_AXIS,
   CHART_GRID,
   CHART_TOOLTIP_STYLE,
   getChartColor,
 } from '@/lib/chartTheme'
+import MarkdownMath from '@/components/ui/MarkdownMath'
 import {
   SlideCanvas,
   buildCategoryAxisProps,
@@ -47,12 +49,10 @@ function StoryCard({ title, body, tone = 'light' }) {
       <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${tone === 'dark' ? 'text-slate-400' : 'text-[var(--text-muted)]'}`}>
         {title}
       </p>
-      <p
+      <MarkdownMath
+        content={body}
         className={`mt-3 text-sm leading-6 ${tone === 'dark' ? 'text-slate-100' : 'text-[var(--text-primary)]'}`}
-        style={clampTextStyle(4)}
-      >
-        {body}
-      </p>
+      />
     </div>
   )
 }
@@ -130,10 +130,14 @@ function HeroSlide({ slide, slideIndex, totalSlides }) {
         <div className="grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-6">
           <div>
             <p className="mb-3 text-xs uppercase tracking-[0.32em] text-[#3258ff]">{slide.eyebrow}</p>
-            <h3 className="max-w-4xl text-[54px] font-semibold leading-[1.02] text-[var(--text-primary)]">
-              {slide.title}
-            </h3>
-            <p className="mt-4 max-w-3xl text-[21px] leading-8 text-[var(--text-secondary)]">{slide.subtitle}</p>
+            <MarkdownMath
+              content={slide.title}
+              className="max-w-4xl text-[54px] font-semibold leading-[1.02] text-[var(--text-primary)]"
+            />
+            <MarkdownMath
+              content={slide.subtitle}
+              className="mt-4 max-w-3xl text-[21px] leading-8 text-[var(--text-secondary)]"
+            />
           </div>
 
           {slide.question ? (
@@ -141,9 +145,10 @@ function HeroSlide({ slide, slideIndex, totalSlides }) {
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--accent-indigo)]">
                 Pregunta Central
               </p>
-              <p className="mt-3 text-[28px] font-semibold leading-9 text-[var(--text-primary)]" style={clampTextStyle(3)}>
-                {slide.question}
-              </p>
+              <MarkdownMath
+                content={slide.question}
+                className="mt-3 text-[28px] font-semibold leading-9 text-[var(--text-primary)]"
+              />
             </div>
           ) : null}
 
@@ -154,10 +159,9 @@ function HeroSlide({ slide, slideIndex, totalSlides }) {
                 className="rounded-3xl border border-[var(--border)] bg-[rgba(248,244,238,0.7)] px-4 py-4 text-sm leading-6 text-[var(--text-secondary)]"
                 style={{
                   boxShadow: `inset 3px 0 0 ${getChartColor(index)}`,
-                  ...clampTextStyle(5),
                 }}
               >
-                {bullet}
+                <MarkdownMath content={bullet} />
               </div>
             ))}
           </div>
@@ -184,10 +188,14 @@ function IndexSlide({ slide, slideIndex, totalSlides }) {
       <div className="grid h-full min-h-0 grid-cols-[320px_minmax(0,1fr)] gap-8">
         <div>
           <p className="mb-3 text-xs uppercase tracking-[0.32em] text-[#0ea5a4]">{slide.eyebrow}</p>
-          <h3 className="text-[48px] font-semibold leading-[1.04] text-[var(--text-primary)]">
-            {slide.title}
-          </h3>
-          <p className="mt-4 max-w-md text-lg leading-8 text-[var(--text-secondary)]">{slide.subtitle}</p>
+          <MarkdownMath
+            content={slide.title}
+            className="text-[48px] font-semibold leading-[1.04] text-[var(--text-primary)]"
+          />
+          <MarkdownMath
+            content={slide.subtitle}
+            className="mt-4 max-w-md text-lg leading-8 text-[var(--text-secondary)]"
+          />
         </div>
 
         <div className="grid min-h-0 grid-cols-2 gap-4">
@@ -199,8 +207,8 @@ function IndexSlide({ slide, slideIndex, totalSlides }) {
               <div className="inline-flex rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-white" style={{ backgroundColor: getChartColor(index) }}>
                 {String(entry.number).padStart(2, '0')}
               </div>
-              <p className="mt-4 text-xl font-semibold text-[var(--text-primary)]">{entry.title}</p>
-              <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" style={clampTextStyle(4)}>{entry.detail}</p>
+              <MarkdownMath content={entry.title} className="mt-4 text-xl font-semibold text-[var(--text-primary)]" />
+              <MarkdownMath content={entry.detail} className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" />
             </div>
           ))}
         </div>
@@ -216,8 +224,8 @@ function BarChartSlide({ slide, slideIndex, totalSlides }) {
     <SlideFrame slideIndex={slideIndex} totalSlides={totalSlides} stage={slide.stage || 'Story'}>
       <div className="grid h-full min-h-0 grid-rows-[96px_minmax(0,1fr)] gap-5">
         <div>
-          <h3 className="text-[34px] font-semibold leading-tight text-[var(--text-primary)]">{slide.title}</h3>
-          <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{slide.subtitle}</p>
+          <MarkdownMath content={slide.title} className="text-[34px] font-semibold leading-tight text-[var(--text-primary)]" />
+          <MarkdownMath content={slide.subtitle} className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" />
         </div>
 
         <div className="min-h-0 rounded-[28px] border border-[var(--border)] bg-white p-5 shadow-[0_14px_30px_rgba(15,23,42,0.05)]">
@@ -246,8 +254,8 @@ function WorkflowSlide({ slide, slideIndex, totalSlides }) {
       <div className="grid h-full min-h-0 grid-rows-[100px_minmax(0,1fr)] gap-6">
         <div>
           <p className="mb-3 text-xs uppercase tracking-[0.32em] text-[#2f855a]">{slide.eyebrow}</p>
-          <h3 className="max-w-3xl text-[42px] font-semibold leading-tight text-[var(--text-primary)]">{slide.title}</h3>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{slide.subtitle}</p>
+          <MarkdownMath content={slide.title} className="max-w-3xl text-[42px] font-semibold leading-tight text-[var(--text-primary)]" />
+          <MarkdownMath content={slide.subtitle} className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]" />
         </div>
 
         <div className="relative min-h-0 overflow-hidden">
@@ -267,8 +275,8 @@ function WorkflowSlide({ slide, slideIndex, totalSlides }) {
             <div className="rounded-[28px] border border-[var(--border)] bg-white px-5 py-5 shadow-[0_16px_36px_rgba(15,23,42,0.05)]">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div>
-                  <p className="text-xl font-semibold text-[var(--text-primary)]">{step.title}</p>
-                  <p className="mt-2 max-w-3xl text-sm text-[var(--text-secondary)]">{step.detail}</p>
+                  <MarkdownMath content={step.title} className="text-xl font-semibold text-[var(--text-primary)]" />
+                  <MarkdownMath content={step.detail} className="mt-2 max-w-3xl text-sm text-[var(--text-secondary)]" />
                 </div>
                 <div className="inline-flex items-center justify-center rounded-full bg-slate-950 px-3 py-1.5 text-xs uppercase tracking-[0.24em] text-white">
                   {step.signal}
@@ -290,8 +298,8 @@ function TrendSlide({ slide, chartId, slideIndex, totalSlides }) {
     <SlideFrame slideIndex={slideIndex} totalSlides={totalSlides} stage={slide.stage || 'Trend'}>
       <div className="grid h-full min-h-0 grid-rows-[96px_minmax(0,1fr)] gap-5">
         <div>
-          <h3 className="text-[34px] font-semibold text-[var(--text-primary)]">{slide.title}</h3>
-          <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">{slide.subtitle}</p>
+          <MarkdownMath content={slide.title} className="text-[34px] font-semibold text-[var(--text-primary)]" />
+          <MarkdownMath content={slide.subtitle} className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" />
         </div>
 
         <div className="min-h-0 rounded-[28px] border border-[var(--border)] bg-white p-5 shadow-[0_14px_30px_rgba(15,23,42,0.05)]">
@@ -329,13 +337,14 @@ function TableFocusSlide({ slide, slideIndex, totalSlides }) {
       <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_320px] gap-6">
         <div className="grid min-h-0 grid-rows-[104px_minmax(0,1fr)] gap-5">
           <div>
-            <h3 className="max-w-4xl text-[34px] font-semibold leading-tight text-[var(--text-primary)]">
-              {slide.question || slide.title}
-            </h3>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
-              {slide.title !== slide.question ? `${slide.title}. ` : ''}
-              {slide.subtitle}
-            </p>
+            <MarkdownMath
+              content={slide.question || slide.title}
+              className="max-w-4xl text-[34px] font-semibold leading-tight text-[var(--text-primary)]"
+            />
+            <MarkdownMath
+              content={slide.title !== slide.question ? `${slide.title}. ${slide.subtitle}` : slide.subtitle}
+              className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]"
+            />
           </div>
 
           <div className="grid min-h-0 grid-cols-2 gap-4">
@@ -345,18 +354,20 @@ function TableFocusSlide({ slide, slideIndex, totalSlides }) {
                 className="rounded-[28px] border border-[var(--border)] bg-white p-5 shadow-[0_14px_30px_rgba(15,23,42,0.05)]"
               >
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-xl font-semibold text-[var(--text-primary)]">{table.name}</p>
+                  <MarkdownMath content={table.name} className="text-xl font-semibold text-[var(--text-primary)]" inline />
                   <span
                     className="h-3 w-3 rounded-full"
                     style={{ backgroundColor: getChartColor(index) }}
                   />
                 </div>
-                <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" style={clampTextStyle(4)}>{table.detail}</p>
+                <MarkdownMath content={table.detail} className="mt-2 text-sm leading-6 text-[var(--text-secondary)]" />
                 <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-1.5 text-xs text-white">
                   Campo destacado
-                  <span className="font-semibold" style={{ color: getChartColor(index) }}>
-                    {table.highlight}
-                  </span>
+                  <MarkdownMath
+                    content={table.highlight}
+                    inline
+                    className="font-semibold"
+                  />
                 </div>
               </div>
             ))}
@@ -371,8 +382,59 @@ function TableFocusSlide({ slide, slideIndex, totalSlides }) {
   )
 }
 
+function RichTextSlide({ slide, slideIndex, totalSlides }) {
+  const callouts = Array.isArray(slide.callouts) ? slide.callouts.slice(0, 4) : []
+
+  return (
+    <SlideFrame slideIndex={slideIndex} totalSlides={totalSlides} stage={slide.stage || 'Insight'}>
+      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.2fr)_320px] gap-6">
+        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+          <div>
+            <MarkdownMath content={slide.title} className="text-[38px] font-semibold leading-tight text-[var(--text-primary)]" />
+            {slide.subtitle ? (
+              <MarkdownMath content={slide.subtitle} className="mt-3 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]" />
+            ) : null}
+          </div>
+
+          <div className="min-h-0 rounded-[28px] border border-[var(--border)] bg-white px-6 py-6 shadow-[0_14px_30px_rgba(15,23,42,0.05)]">
+            <MarkdownMath content={slide.body} className="text-base leading-8 text-[var(--text-primary)]" />
+          </div>
+        </div>
+
+        <div className="grid min-h-0 auto-rows-max content-start gap-4">
+          {callouts.length ? (
+            callouts.map((callout, index) => (
+              <div
+                key={`${callout.label}-${index}`}
+                className="self-start rounded-[24px] border border-[var(--border)] bg-white px-5 py-5 shadow-[0_14px_30px_rgba(15,23,42,0.05)]"
+                style={{ boxShadow: `inset 3px 0 0 ${getChartColor(index)}` }}
+              >
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                  {callout.label}
+                </p>
+                <MarkdownMath content={callout.value} className="mt-3 text-sm leading-6 text-[var(--text-primary)]" />
+              </div>
+            ))
+          ) : (
+            <div className="self-start rounded-[24px] border border-[var(--border)] bg-[rgba(248,244,238,0.72)] px-5 py-5 shadow-[0_14px_30px_rgba(15,23,42,0.05)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                Lectura
+              </p>
+              <p className="mt-3 text-sm leading-6 text-[var(--text-secondary)]">
+                Esta diapositiva se adapto a la pregunta y solo aparece cuando aporta contexto adicional.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+    </SlideFrame>
+  )
+}
+
 export default function PresentationDeck({ slides = [] }) {
-  if (!slides.length) {
+  const normalizedSlides = normalizePresentationSlides(slides)
+
+  if (!normalizedSlides.length) {
     return (
       <div className="rounded-[32px] border border-dashed border-[var(--border)] bg-white p-8 text-center text-[var(--text-secondary)]">
         Aun no hay slides para esta lectura.
@@ -382,10 +444,10 @@ export default function PresentationDeck({ slides = [] }) {
 
   return (
     <div className="mx-auto flex w-full max-w-[1880px] flex-col gap-10 pb-10">
-      {slides.map((slide, index) => {
+      {normalizedSlides.map((slide, index) => {
         const sharedProps = {
           slideIndex: index,
-          totalSlides: slides.length,
+          totalSlides: normalizedSlides.length,
         }
 
         if (slide.type === 'index') return <IndexSlide key={`${slide.type}-${index}`} slide={slide} {...sharedProps} />
@@ -402,6 +464,7 @@ export default function PresentationDeck({ slides = [] }) {
             />
           )
         }
+        if (slide.type === 'rich_text') return <RichTextSlide key={`${slide.type}-${index}`} slide={slide} {...sharedProps} />
         if (slide.type === 'table_focus') return <TableFocusSlide key={`${slide.type}-${index}`} slide={slide} {...sharedProps} />
         return <BarChartSlide key={`${slide.type}-${index}`} slide={slide} {...sharedProps} />
       })}

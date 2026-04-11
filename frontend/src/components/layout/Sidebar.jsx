@@ -23,7 +23,6 @@ const navItems = [
   { href: '/dashboard/connectors', label: 'Conectores', icon: Plug },
   { href: '/dashboard/schema', label: 'Schema', icon: Database },
   { href: '/dashboard/ai', label: 'AI Insights', icon: Sparkles },
-  { href: '/dashboard/settings', label: 'Ajustes', icon: Settings, soon: true },
 ]
 
 export default function Sidebar() {

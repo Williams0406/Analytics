@@ -41,6 +41,7 @@ import {
   clampTextStyle,
   getNarrativePanels,
 } from '@/components/analytics/slideSystem'
+import { useEffect, useRef, useState } from 'react'
 
 function formatValue(value) {
   if (typeof value === 'number') {
@@ -55,6 +56,22 @@ function getSemanticColor(signal, fallbackIndex = 0) {
   if (signal === 'negative') return '#f46d43'
   if (signal === 'neutral') return '#3258ff'
   return getChartColor(fallbackIndex)
+}
+
+// ─── Paleta alineada al design system (light_editorial) ───────────────────────
+const MAP_OCEAN     = '#dce8f5'
+const MAP_LAND      = '#dde7f3'
+const MAP_BORDER    = '#8aadd4'
+ 
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#', ''), 16)
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`
+}
+ 
+function getBubbleRadius(value, maxValue) {
+  const MIN = 5, MAX = 22
+  if (!maxValue) return MIN
+  return MIN + Math.sqrt(Math.max(0, value) / maxValue) * (MAX - MIN)
 }
 
 function renderReferenceLines(slide, axisKey = 'y') {
@@ -169,7 +186,7 @@ function StoryCard({ title, body, tone = 'light' }) {
   }
 
   return (
-    <div className={`rounded-[24px] border p-4 shadow-[0_14px_30px_rgba(15,23,42,0.05)] ${tones[tone] || tones.light}`}>
+    <div className={`self-start rounded-[24px] border p-4 shadow-[0_14px_30px_rgba(15,23,42,0.05)] ${tones[tone] || tones.light}`}>
       <p className={`text-[11px] font-semibold uppercase tracking-[0.24em] ${tone === 'dark' ? 'text-slate-400' : 'text-[var(--text-muted)]'}`}>
         {title}
       </p>
@@ -215,7 +232,7 @@ function TextBlockCard({ block }) {
 
   return (
     <div
-      className={`rounded-[24px] border bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${sizeClass}`}
+      className={`self-start rounded-[24px] border bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${sizeClass}`}
       style={{
         borderColor: `rgba(${stripeColor}, 0.18)`,
         boxShadow: `inset 3px 0 0 ${color}`,
@@ -392,57 +409,272 @@ function HeatmapChartSlide({ slide }) {
 }
 
 function MapChartSlide({ slide }) {
-  const maxValue = Math.max(...(slide.data || []).map((item) => Number(item.value) || 0), 1)
-
+  const svgRef                    = useRef(null)
+  const [active, setActive]       = useState(null)
+  const [rendered, setRendered]   = useState(false)
+  const [error, setError]         = useState(false)
+ 
+  const data     = slide.data || []
+  const maxValue = Math.max(...data.map((d) => Number(d.value) || 0), 1)
+ 
+  useEffect(() => {
+    let cancelled = false
+ 
+    async function draw() {
+      // ── Importa D3 y TopoJSON desde node_modules (instalados) ──────────────
+      const [d3, { feature }] = await Promise.all([
+        import('d3'),
+        import('topojson-client'),
+      ])
+      if (cancelled) return
+ 
+      // ── Carga el GeoJSON del mundo ──────────────────────────────────────────
+      let world
+      try {
+        world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
+      } catch {
+        setError(true)
+        return
+      }
+      if (cancelled) return
+ 
+      const svgEl = svgRef.current
+      if (!svgEl) return
+      while (svgEl.firstChild) svgEl.removeChild(svgEl.firstChild)
+ 
+      const W = svgEl.clientWidth  || 600
+      const H = svgEl.clientHeight || 360
+ 
+      const svg = d3.select(svgEl)
+        .attr('viewBox', `0 0 ${W} ${H}`)
+        .attr('preserveAspectRatio', 'xMidYMid meet')
+ 
+      // ── Proyección: se auto-centra en los puntos de datos ──────────────────
+      // Si hay puntos, centra automáticamente; si no, usa vista mundial
+      const lngs = data.map((d) => Number(d.lng ?? d.x)).filter(Boolean)
+      const lats = data.map((d) => Number(d.lat ?? d.y)).filter(Boolean)
+ 
+      let projection
+      if (lngs.length > 0) {
+        const centerLng = (Math.min(...lngs) + Math.max(...lngs)) / 2
+        const centerLat = (Math.min(...lats) + Math.max(...lats)) / 2
+        const spanLng   = Math.max(...lngs) - Math.min(...lngs)
+        const spanLat   = Math.max(...lats) - Math.min(...lats)
+        // Escala según el span geográfico de los datos
+        const scale = Math.min(
+          (W / Math.max(spanLng, 10)) * 28,
+          (H / Math.max(spanLat, 10)) * 28,
+          800
+        )
+        projection = d3.geoMercator()
+          .center([centerLng, centerLat])
+          .scale(scale)
+          .translate([W / 2, H / 2])
+      } else {
+        // Vista mundial por defecto
+        projection = d3.geoNaturalEarth1()
+          .scale(W / 6.5)
+          .translate([W / 2, H / 2])
+      }
+ 
+      const path      = d3.geoPath().projection(projection)
+      const countries = feature(world, world.objects.countries)
+ 
+      // ── Fondo océano ────────────────────────────────────────────────────────
+      svg.append('rect')
+        .attr('width', W).attr('height', H)
+        .attr('rx', 12)
+        .attr('fill', MAP_OCEAN)
+ 
+      // ── Países ──────────────────────────────────────────────────────────────
+      svg.selectAll('.country')
+        .data(countries.features)
+        .join('path')
+        .attr('class', 'country')
+        .attr('d', path)
+        .attr('fill', MAP_LAND)
+        .attr('stroke', MAP_BORDER)
+        .attr('stroke-width', 0.4)
+ 
+      // ── Burbujas de datos ───────────────────────────────────────────────────
+      data.forEach((point, index) => {
+        const lng = Number(point.lng ?? point.x)
+        const lat = Number(point.lat ?? point.y)
+        if (isNaN(lng) || isNaN(lat)) return
+ 
+        const coords = projection([lng, lat])
+        if (!coords) return
+        const [px, py] = coords
+        if (px < 0 || py < 0 || px > W || py > H) return
+ 
+        const r     = getBubbleRadius(Number(point.value) || 0, maxValue)
+        const color = getChartColor(index)
+ 
+        // Halo
+        svg.append('circle')
+          .attr('cx', px).attr('cy', py).attr('r', r + 6)
+          .attr('fill', color).attr('fill-opacity', 0.1)
+          .style('pointer-events', 'none')
+ 
+        // Burbuja
+        svg.append('circle')
+          .attr('cx', px).attr('cy', py).attr('r', r)
+          .attr('fill', color).attr('fill-opacity', 0.82)
+          .attr('stroke', '#ffffff').attr('stroke-width', 2)
+          .style('cursor', 'pointer')
+          .on('mouseenter', () => setActive(index))
+          .on('mouseleave', () => setActive(null))
+ 
+        // Label pill
+        const g   = svg.append('g').style('pointer-events', 'none')
+        const txt = g.append('text')
+          .attr('x', px + r + 5).attr('y', py)
+          .attr('dominant-baseline', 'middle')
+          .attr('font-size', 11).attr('font-weight', 500)
+          .attr('fill', '#16202b')
+          .text(point.label)
+ 
+        try {
+          const b = txt.node().getBBox()
+          if (b.width > 0) {
+            g.insert('rect', 'text')
+              .attr('x', b.x - 4).attr('y', b.y - 3)
+              .attr('width', b.width + 8).attr('height', b.height + 6)
+              .attr('rx', 5).attr('fill', 'white').attr('fill-opacity', 0.92)
+              .attr('stroke', MAP_BORDER).attr('stroke-width', 0.5)
+          }
+        } catch (_) {}
+      })
+ 
+      setRendered(true)
+    }
+ 
+    draw().catch((err) => {
+      console.error('MapChartSlide draw error:', err)
+      setError(true)
+      setRendered(true)
+    })
+ 
+    return () => { cancelled = true }
+  }, [JSON.stringify(data), maxValue])
+ 
+  const activeItem = active !== null ? data[active] : null
+ 
   return (
     <div className="grid h-full min-h-0 grid-cols-[minmax(0,1.35fr)_280px] gap-4">
-      <div className="rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,#fdfefe_0%,#f5f8fc_100%)] p-4">
-        <div className="aspect-[100/55] h-full min-h-0 w-full">
-          <svg viewBox="0 0 100 55" preserveAspectRatio="xMidYMid meet" className="h-full w-full">
-          <rect x="0" y="0" width="100" height="55" rx="6" fill="#f7fafc" />
-          <path d="M7 10 C14 7, 20 8, 24 14 C22 18, 18 21, 16 25 C12 28, 10 24, 9 19 C6 16, 6 12, 7 10 Z" fill="#dbe5f0" />
-          <path d="M26 22 C29 20, 33 20, 35 24 C35 29, 33 35, 31 42 C28 48, 25 43, 24 36 C25 31, 25 26, 26 22 Z" fill="#dbe5f0" />
-          <path d="M43 10 C49 9, 58 10, 63 15 C60 19, 57 23, 55 27 C51 29, 47 26, 45 21 C43 18, 42 13, 43 10 Z" fill="#dbe5f0" />
-          <path d="M54 24 C58 25, 61 28, 61 33 C60 39, 58 44, 55 47 C51 44, 50 38, 51 31 C51 28, 52 25, 54 24 Z" fill="#dbe5f0" />
-          <path d="M64 12 C73 10, 84 12, 89 18 C89 24, 82 26, 78 29 C74 31, 70 33, 67 31 C64 28, 63 23, 63 18 C63 15, 63 13, 64 12 Z" fill="#dbe5f0" />
-          <path d="M79 35 C83 34, 88 36, 90 40 C89 43, 86 46, 83 47 C80 46, 78 41, 79 35 Z" fill="#dbe5f0" />
-
-          {(slide.data || []).map((point, index) => {
-            const radius = 2.4 + ((Number(point.value) || 0) / maxValue) * 4.8
-            const color = getChartColor(index)
-
-            return (
-              <g key={`${point.label}-${point.x}-${point.y}`}>
-                <circle cx={point.x} cy={point.y} r={radius} fill={color} fillOpacity="0.18" />
-                <circle cx={point.x} cy={point.y} r={Math.max(1.6, radius * 0.48)} fill={color} />
-                <text x={point.x + 2.2} y={point.y - 1.8} fill="#16202b" fontSize="1.9">
-                  {point.label}
-                </text>
-              </g>
-            )
-          })}
-          </svg>
-        </div>
-      </div>
-
-      <div className="grid min-h-0 auto-rows-fr gap-3">
-        {(slide.data || []).map((item, index) => (
-          <div
-            key={`${item.label}-legend`}
-            className="flex items-center justify-between gap-4 rounded-2xl border border-[var(--border)] bg-white px-4 py-3"
-          >
-            <div className="flex items-center gap-3">
-              <span
-                className="h-3 w-3 rounded-full"
-                style={{ backgroundColor: getChartColor(index) }}
-              />
-              <span className="text-sm text-[var(--text-secondary)]">{item.label}</span>
-            </div>
-            <span className="text-sm font-semibold text-[var(--text-primary)]">
-              {formatValue(item.value)}
+ 
+      {/* ── Área del mapa ─────────────────────────────────────────────────── */}
+      <div
+        className="relative rounded-[24px] border border-[var(--border)] overflow-hidden"
+        style={{ background: MAP_OCEAN }}
+      >
+        <svg
+          ref={svgRef}
+          className="h-full w-full"
+          style={{ display: 'block' }}
+        />
+ 
+        {/* Estado: cargando */}
+        {!rendered && !error && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+              Cargando mapa…
             </span>
           </div>
-        ))}
+        )}
+ 
+        {/* Estado: error */}
+        {error && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--text-muted)]">
+              No se pudo cargar el mapa
+            </span>
+          </div>
+        )}
+ 
+        {/* Tooltip hover */}
+        {activeItem && (
+          <div
+            className="pointer-events-none absolute bottom-4 left-4 rounded-2xl px-3 py-2 text-xs"
+            style={{
+              background: '#16202b',
+              color: '#f1f5f9',
+              border: '1px solid rgba(255,255,255,0.08)',
+            }}
+          >
+            <p className="font-semibold text-white">{activeItem.label}</p>
+            <p className="mt-0.5 text-slate-300">{formatValue(Number(activeItem.value))}</p>
+          </div>
+        )}
+ 
+        {/* Escala de burbujas */}
+        <div
+          className="pointer-events-none absolute bottom-4 right-4 flex items-center gap-2 rounded-xl px-3 py-2"
+          style={{
+            background: 'rgba(255,255,255,0.85)',
+            border: `0.5px solid ${MAP_BORDER}`,
+          }}
+        >
+          <svg width="44" height="18" style={{ overflow: 'visible' }}>
+            <circle cx="6"  cy="15" r="3"  fill="#3258ff" fillOpacity="0.6" stroke="#3258ff" strokeWidth="1" />
+            <circle cx="20" cy="12" r="6"  fill="#3258ff" fillOpacity="0.6" stroke="#3258ff" strokeWidth="1" />
+            <circle cx="38" cy="8"  r="10" fill="#3258ff" fillOpacity="0.6" stroke="#3258ff" strokeWidth="1" />
+          </svg>
+          <span className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            volumen
+          </span>
+        </div>
+      </div>
+ 
+      {/* ── Leyenda lateral ────────────────────────────────────────────────── */}
+      <div className="grid min-h-0 auto-rows-max content-start gap-2 overflow-y-auto">
+        <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">
+          {slide.legend_label || 'Ubicaciones'}
+        </p>
+ 
+        {data.map((item, index) => {
+          const pct      = Math.round((Math.max(0, Number(item.value) || 0) / maxValue) * 100)
+          const color    = getChartColor(index)
+          const isActive = active === index
+ 
+          return (
+            <div
+              key={`${item.label}-legend`}
+              className="cursor-pointer rounded-[16px] border px-4 py-3 transition-all duration-150"
+              style={{
+                borderColor: isActive ? color : 'var(--border)',
+                background:  isActive ? `rgba(${hexToRgb(color)}, 0.06)` : 'white',
+                boxShadow:   isActive ? `inset 3px 0 0 ${color}` : 'none',
+              }}
+              onMouseEnter={() => setActive(index)}
+              onMouseLeave={() => setActive(null)}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <span
+                    className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="text-sm text-[var(--text-secondary)]">{item.label}</span>
+                </div>
+                <span className="text-sm font-semibold text-[var(--text-primary)]">
+                  {formatValue(Number(item.value))}
+                </span>
+              </div>
+ 
+              <div className="mt-2 h-[3px] w-full overflow-hidden rounded-full bg-[var(--surface-muted,#f1f5f9)]">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: `${pct}%`, backgroundColor: color }}
+                />
+              </div>
+ 
+              <p className="mt-1 text-right text-[10px] text-[var(--text-muted)]">
+                {pct}% del máximo
+              </p>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -701,7 +933,7 @@ function PieLikeSlide({ slide }) {
         </ResponsiveContainer>
       </div>
 
-      <div className="grid min-h-0 auto-rows-fr gap-3">
+      <div className="grid min-h-0 auto-rows-max content-start gap-3">
         {(slide.data || []).map((item, index) => (
           <div
             key={`${item.label}-item`}
@@ -936,15 +1168,13 @@ function StructuredCanvas({ slide, charts }) {
     const headlineContent = topBlocks
     const footerContent = [...bottomLeftBlocks, ...bottomCenterBlocks, ...bottomRightBlocks]
     const inlineSupporting = zones.insight ? [] : supportingCharts
-    const insightContent = [
-      ...supportingCharts.filter(() => Boolean(zones.insight)),
-      ...sideBlocks,
-    ]
+    const insightCharts = zones.insight ? supportingCharts : []
+    const insightBlocks = zones.insight ? sideBlocks : []
 
     return (
       <div className="grid h-full min-h-0 grid-cols-12 grid-rows-10 gap-4">
         {headlineContent.length ? (
-          <div style={getZoneStyle(zones.headline)} className="grid min-h-0 auto-rows-fr gap-3">
+          <div style={getZoneStyle(zones.headline)} className="grid min-h-0 auto-rows-max content-start gap-3">
             {headlineContent.map((block, index) => (
               <TextBlockCard key={`${block.role}-${index}-headline`} block={block} />
             ))}
@@ -964,22 +1194,27 @@ function StructuredCanvas({ slide, charts }) {
           ) : null}
         </div>
 
-        {zones.insight && insightContent.length ? (
-          <div
-            style={{
-              ...getZoneStyle(zones.insight),
-              gridTemplateRows: `repeat(${Math.max(insightContent.length, 1)}, minmax(0, 1fr))`,
-            }}
-            className="grid min-h-0 gap-4"
-          >
-            {supportingCharts.map((chart, index) => (
-              <div key={`${chart.chart_type || 'support'}-${index}-insight`} className="min-h-0">
-                <ChartPanel chart={chart} />
+        {zones.insight && (insightCharts.length || insightBlocks.length) ? (
+          <div style={getZoneStyle(zones.insight)} className="grid min-h-0 content-start gap-4">
+            {insightCharts.length ? (
+              <div
+                className="grid min-h-0 gap-4"
+                style={{ gridTemplateRows: `repeat(${insightCharts.length}, minmax(180px, 1fr))` }}
+              >
+                {insightCharts.map((chart, index) => (
+                  <div key={`${chart.chart_type || 'support'}-${index}-insight`} className="min-h-0">
+                    <ChartPanel chart={chart} />
+                  </div>
+                ))}
               </div>
-            ))}
-            {sideBlocks.map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-insight`} block={block} />
-            ))}
+            ) : null}
+            {insightBlocks.length ? (
+              <div className="grid auto-rows-max content-start gap-4">
+                {insightBlocks.map((block, index) => (
+                  <TextBlockCard key={`${block.role}-${index}-insight`} block={block} />
+                ))}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -989,7 +1224,7 @@ function StructuredCanvas({ slide, charts }) {
               ...getZoneStyle(zones.footer),
               gridTemplateColumns: `repeat(${Math.min(Math.max(footerContent.length, 1), 3)}, minmax(0, 1fr))`,
             }}
-            className="grid min-h-0 gap-4"
+            className="grid min-h-0 items-start gap-4"
           >
             {footerContent.map((block, index) => (
               <TextBlockCard key={`${block.role}-${index}-footer`} block={block} />
