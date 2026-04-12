@@ -18,9 +18,9 @@ import {
 import { logout } from '@/lib/auth'
 
 const navItems = [
-  { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3 },
-  { href: '/dashboard/connectors', label: 'Conectores', icon: Plug },
+  { href: '/dashboard/connectors', label: 'Connectors', icon: Plug },
   { href: '/dashboard/schema', label: 'Schema', icon: Database },
   { href: '/dashboard/ai', label: 'AI Insights', icon: Sparkles },
 ]

@@ -41,7 +41,7 @@ import {
   clampTextStyle,
   getNarrativePanels,
 } from '@/components/analytics/slideSystem'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 function formatValue(value) {
   if (typeof value === 'number') {
@@ -109,11 +109,51 @@ function renderAnnotations(slide) {
   ))
 }
 
-function SlideFrame({ children, slideIndex = 0, totalSlides = 1, stage = 'Data Story' }) {
+function useSlideScale() {
+  const ref = useRef(null)
+  const [scale, setScale] = useState(1)
+
+  useEffect(() => {
+    function resize() {
+      if (!ref.current) return
+
+      const height = ref.current.clientHeight
+      const width = ref.current.clientWidth
+
+      const baseHeight = 900
+      const baseWidth = 1600
+
+      const scaleFactor = Math.min(
+        width / baseWidth,
+        height / baseHeight,
+        1
+      )
+
+      setScale(scaleFactor)
+    }
+
+    resize()
+    window.addEventListener('resize', resize)
+
+    return () => window.removeEventListener('resize', resize)
+  }, [])
+
+  return { ref, scale }
+}
+
+function SlideFrame({ children }) {
   return (
-    <SlideCanvas stage={stage} slideIndex={slideIndex} totalSlides={totalSlides} contentClassName="grid h-full min-h-0">
-      {children}
-    </SlideCanvas>
+    <div className="w-full h-full aspect-[16/9] overflow-hidden">
+      <div
+        className="w-full h-full"
+        style={{
+          width: '100%',
+          height: '100%',
+        }}
+      >
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -167,7 +207,7 @@ function SlideHeader({ slide, chartsCount = 1 }) {
           {chartsCount > 1 ? `${chartsCount} visuales conectados` : 'Visual principal'}
         </span>
       </div>
-      <h3 className="max-w-5xl text-[34px] font-semibold leading-tight text-[var(--text-primary)]">
+      <h3 className="max-w-5xl text-[28px] xl:text-[32px] font-semibold leading-tight text-[var(--text-primary)]">
         {slide.question || slide.title}
       </h3>
       <p className="mt-2 max-w-4xl text-sm leading-6 text-[var(--text-secondary)]" style={clampTextStyle(3)}>
@@ -232,7 +272,7 @@ function TextBlockCard({ block }) {
 
   return (
     <div
-      className={`self-start rounded-[24px] border bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${sizeClass}`}
+      className={`inline-block w-fit max-w-full self-start rounded-[24px] border bg-white shadow-[0_16px_36px_rgba(15,23,42,0.05)] ${sizeClass}`}
       style={{
         borderColor: `rgba(${stripeColor}, 0.18)`,
         boxShadow: `inset 3px 0 0 ${color}`,
@@ -337,73 +377,247 @@ function ChartViewport({ children, className = '' }) {
   return <div className={`h-full min-h-0 w-full ${className}`}>{children}</div>
 }
 
-function HeatmapCell({ value }) {
-  const intensity = Math.min(Math.abs(value || 0), 1)
+function getCellBackground(value) {
+  if (value === null || value === undefined) return null
+  const intensity = Math.min(Math.abs(value), 1)
   const hue = value >= 0 ? '14,165,164' : '244,109,67'
-  const background = `rgba(${hue}, ${0.12 + intensity * 0.38})`
-
+  const alpha = (0.08 + intensity * 0.62).toFixed(2)
+  return `rgba(${hue}, ${alpha})`
+}
+ 
+function getCellTextColor(value) {
+  if (value === null || value === undefined) return 'var(--text-secondary)'
+  const intensity = Math.abs(value)
+  if (intensity > 0.55) return value >= 0 ? '#085041' : '#993c1d'
+  return 'var(--text-primary)'
+}
+ 
+function formatCellValue(value) {
+  if (value === null || value === undefined) return '—'
+  const n = Number(value)
+  if (Math.abs(n) < 10) return n.toFixed(2)
+  return n.toLocaleString()
+}
+ 
+function HeatmapCell({ value, rowLabel, colLabel, isActive, onEnter, onLeave }) {
+  const bg        = getCellBackground(value)
+  const textColor = getCellTextColor(value)
+  const isNull    = bg === null
+ 
   return (
     <div
-      className="flex h-14 items-center justify-center rounded-2xl border border-[var(--border)] text-xs font-semibold text-[var(--text-primary)]"
-      style={{ background }}
+      className="relative flex items-center justify-center text-[11px] font-semibold transition-all duration-100 cursor-pointer select-none"
+      style={{
+        borderRadius: 6,
+        background:   isNull ? 'var(--surface-muted, #f1f5f9)' : bg,
+        color:        isNull ? 'var(--text-muted)' : textColor,
+        outline:      isActive ? '2px solid #3258ff' : 'none',
+        outlineOffset: '1px',
+        transform:    isActive ? 'scale(1.06)' : 'scale(1)',
+        zIndex:       isActive ? 2 : 0,
+      }}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
     >
-      {Number(value || 0).toFixed(2)}
+      {formatCellValue(value)}
+ 
+      {isActive && !isNull && (
+        <div
+          className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-[11px] text-white"
+          style={{
+            background: '#16202b',
+            border: '1px solid rgba(255,255,255,0.08)',
+            zIndex: 20,
+          }}
+        >
+          <span className="text-slate-400">{rowLabel} · {colLabel}: </span>
+          <span className="font-semibold">{formatCellValue(value)}</span>
+        </div>
+      )}
     </div>
   )
 }
-
+ 
 function HeatmapChartSlide({ slide }) {
-  const cellLookup = new Map((slide.data || []).map((cell) => [`${cell.y}::${cell.x}`, cell.value]))
-  const values = (slide.data || []).map((cell) => Number(cell.value) || 0)
+  const [activeCell, setActiveCell] = useState(null)
+  const containerRef                = useRef(null)
+ 
+  // El slide canvas es 1600×900; el área útil del chart (dentro del ChartPanel)
+  // es aproximadamente (1600 - padding - sidebar) × (900 - header - padding - scale).
+  // Medimos el contenedor real con ResizeObserver para ser exactos.
+  const [containerSize, setContainerSize] = useState({ w: 900, h: 520 })
+ 
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+ 
+    const measure = () => {
+      setContainerSize({ w: el.clientWidth, h: el.clientHeight })
+    }
+    measure()
+ 
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(measure)
+      ro.observe(el)
+      return () => ro.disconnect()
+    }
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [])
+ 
+  const cellLookup = new Map(
+    (slide.data || []).map((cell) => [`${cell.y}::${cell.x}`, cell.value])
+  )
+  const values   = (slide.data || []).map((cell) => Number(cell.value) || 0)
   const minValue = values.length ? Math.min(...values) : 0
   const maxValue = values.length ? Math.max(...values) : 0
-
+ 
+  const xLabels = slide.x_labels || []
+  const yLabels = slide.y_labels || []
+ 
+  // ── Altura reservada para header de columnas + barra de escala + gaps ──
+  const HEADER_H   = 36   // px — fila de labels de columnas
+  const SCALE_H    = 32   // px — barra de escala inferior
+  const GAP        = 3    // px — gap entre celdas
+  const ROW_LABEL_W = 110 // px — ancho columna de etiquetas de fila
+ 
+  // Espacio neto disponible para la matriz de celdas
+  const matrixH = containerSize.h - HEADER_H - SCALE_H - 24  // 24 = gaps entre rows del grid
+  const matrixW = containerSize.w - ROW_LABEL_W - 8
+ 
+  // Tamaño de celda cuadrada que encaja exactamente en la matriz, sin scroll
+  const cellByH = yLabels.length > 0 ? Math.floor((matrixH - GAP * (yLabels.length - 1)) / yLabels.length) : 40
+  const cellByW = xLabels.length > 0 ? Math.floor((matrixW - GAP * (xLabels.length - 1)) / xLabels.length) : 40
+ 
+  // Usamos el mínimo para que entren tanto filas como columnas
+  // Clamp: mínimo 22px (legible), máximo 56px (no desperdicia espacio)
+  const cellSize = Math.max(22, Math.min(cellByH, cellByW, 56))
+ 
+  // Font size se adapta al tamaño de celda
+  const cellFontSize = cellSize < 30 ? 9 : cellSize < 38 ? 10 : 11
+ 
+  // Ancho de etiquetas de fila se ajusta si hay poco espacio horizontal
+  const rowLabelW = Math.min(
+    ROW_LABEL_W,
+    Math.max(90, Math.floor(containerSize.w * 0.12))
+  )
+ 
   return (
-    <div className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3">
-      <div className="grid grid-cols-[140px_minmax(0,1fr)] items-end gap-3">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">
-          Segmentos
-        </div>
-        <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[var(--text-muted)]">
-          Variables
-        </div>
-      </div>
+    <div
+      ref={containerRef}
+      className="grid h-full min-h-0 w-full"
+      style={{ gridTemplateRows: `${HEADER_H}px minmax(0,1fr) ${SCALE_H}px`, gap: '6px' }}
+    >
+ 
+      {/* ── Header: esquina + labels de columnas ───────────────────── */}
       <div
-        className="grid min-h-0 gap-2 overflow-hidden"
-        style={{ gridTemplateColumns: `140px repeat(${(slide.x_labels || []).length}, minmax(0, 1fr))` }}
+        className="grid items-end"
+        style={{
+          gridTemplateColumns: `${rowLabelW}px repeat(${xLabels.length}, ${cellSize}px)`,
+          gap: `${GAP}px`,
+        }}
       >
-        <div />
-        {(slide.x_labels || []).map((label) => (
+        <div className="flex items-end pb-1">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+            {slide.y_axis_label || 'Segmentos'}
+          </span>
+        </div>
+        {xLabels.map((label) => (
           <div
             key={label}
-            className="text-center text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]"
-            style={clampTextStyle(2)}
+            className="text-center text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--text-muted)] leading-tight"
+            style={{
+              // Trunca labels largos para que no desborden la celda
+              maxWidth: cellSize,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={label}
           >
             {label}
           </div>
         ))}
-
-        {(slide.y_labels || []).map((rowLabel) => (
-          <div key={rowLabel} className="contents">
-            <div className="flex items-center text-sm text-[var(--text-secondary)]">{rowLabel}</div>
-            {(slide.x_labels || []).map((columnLabel) => (
-              <HeatmapCell
-                key={`${rowLabel}-${columnLabel}`}
-                value={cellLookup.get(`${rowLabel}::${columnLabel}`)}
-              />
-            ))}
-          </div>
-        ))}
       </div>
-
-      <div className="grid grid-cols-[160px_minmax(0,1fr)_100px] items-center gap-3 text-[11px] text-[var(--text-muted)]">
-        <span className="font-semibold uppercase tracking-[0.18em]">Correlation Strength</span>
-        <div className="h-2 rounded-full bg-[linear-gradient(90deg,#f46d43_0%,#fff4ef_18%,#f8fafc_50%,#e7fbf8_82%,#0ea5a4_100%)]" />
-        <div className="flex items-center justify-between">
-          <span>{minValue.toFixed(2)}</span>
-          <span>{maxValue.toFixed(2)}</span>
+ 
+      {/* ── Matriz de celdas ─────────────────────────────────────────── */}
+      {/* overflow: hidden — el tamaño calculado debe ser exacto, no necesita scroll */}
+      <div className="min-h-0 min-w-0 overflow-hidden">
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `${rowLabelW}px repeat(${xLabels.length}, ${cellSize}px)`,
+            gridTemplateRows:    `repeat(${yLabels.length}, ${cellSize}px)`,
+            gap: `${GAP}px`,
+          }}
+        >
+          {yLabels.map((rowLabel) => (
+            <Fragment key={rowLabel}>
+              {/* Etiqueta de fila */}
+              <div
+                className="flex items-center justify-end text-[var(--text-secondary)]"
+                style={{
+                  fontSize: cellFontSize + 1,
+                  paddingRight: 8,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={rowLabel}
+              >
+                {rowLabel}
+              </div>
+ 
+              {/* Celdas */}
+              {xLabels.map((colLabel) => {
+                const key    = `${rowLabel}::${colLabel}`
+                const rawVal = cellLookup.get(key)
+                const value  = rawVal !== undefined ? Number(rawVal) : null
+ 
+                return (
+                  <HeatmapCell
+                    key={key}
+                    value={value}
+                    rowLabel={rowLabel}
+                    colLabel={colLabel}
+                    isActive={activeCell === key}
+                    onEnter={() => setActiveCell(key)}
+                    onLeave={() => setActiveCell(null)}
+                  />
+                )
+              })}
+            </Fragment>
+          ))}
         </div>
       </div>
+ 
+      {/* ── Barra de escala ─────────────────────────────────────────── */}
+      <div
+        className="grid items-center"
+        style={{
+          gridTemplateColumns: `${rowLabelW}px repeat(${xLabels.length}, ${cellSize}px)`,
+          gap: `${GAP}px`,
+        }}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+          Correlation
+        </span>
+
+        <div
+          style={{
+            gridColumn: `2 / span ${xLabels.length}`,
+          }}
+          className="flex flex-col gap-1"
+        >
+          <div className="h-[5px] rounded-full bg-[linear-gradient(90deg,#f46d43_0%,#fff4ef_18%,#f8fafc_50%,#e7fbf8_82%,#0ea5a4_100%)]" />
+          <div className="flex justify-between text-[10px] text-[var(--text-muted)]">
+            <span>{minValue.toFixed(2)}</span>
+            <span>0.00</span>
+            <span>{maxValue.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+ 
     </div>
   )
 }
@@ -451,8 +665,8 @@ function MapChartSlide({ slide }) {
  
       // ── Proyección: se auto-centra en los puntos de datos ──────────────────
       // Si hay puntos, centra automáticamente; si no, usa vista mundial
-      const lngs = data.map((d) => Number(d.lng ?? d.x)).filter(Boolean)
-      const lats = data.map((d) => Number(d.lat ?? d.y)).filter(Boolean)
+      const lngs = data.map((d) => Number(d.lng ?? d.x)).filter((v) => !isNaN(v))
+      const lats = data.map((d) => Number(d.lat ?? d.y)).filter((v) => !isNaN(v))
  
       let projection
       if (lngs.length > 0) {
@@ -556,7 +770,7 @@ function MapChartSlide({ slide }) {
     })
  
     return () => { cancelled = true }
-  }, [JSON.stringify(data), maxValue])
+  }, [data, maxValue])
  
   const activeItem = active !== null ? data[active] : null
  
@@ -912,7 +1126,7 @@ function PieLikeSlide({ slide }) {
   const innerRadius = slide.chart_type === 'donut' ? 64 : 0
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[320px_minmax(0,1fr)] items-center gap-5">
+    <div className="grid h-full min-h-0 grid-cols-[minmax(260px,0.9fr)_minmax(0,1.1fr)] items-center gap-5">
       <div className="h-full min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <PieChart>
@@ -1126,210 +1340,194 @@ function ChartPanel({ chart, isPrimary = false }) {
   )
 }
 
-function getLayoutConfig(slide) {
-  if (slide.layout && typeof slide.layout === 'object') return slide.layout
-  if (slide.layout_name || slide.layout) {
-    return { template_name: slide.layout_name || slide.layout }
-  }
-  return null
+function getSmartLayout(slide, charts) {
+  const chartType = (
+    charts?.[0]?.chart_type ||
+    slide.chart_type ||
+    ''
+  ).toLowerCase()
+
+  const left70Charts = new Set([
+    'bar',
+    'bar_horizontal',
+    'heatmap',
+    'pie',
+    'donut',
+    'radar',
+    'bullet',
+    'treemap',
+  ])
+
+  return left70Charts.has(chartType)
+    ? 'LEFT_70'
+    : 'TOP_70'
 }
 
-function getZoneStyle(zone) {
-  if (!Array.isArray(zone) || zone.length !== 4) return undefined
-  const [x, y, width, height] = zone
-  return {
-    gridColumn: `${x + 1} / span ${width}`,
-    gridRow: `${y + 1} / span ${height}`,
-    minWidth: 0,
-  }
-}
-
-function StructuredCanvas({ slide, charts }) {
+function StructuredCanvas({
+  slide,
+  charts,
+  slideIndex = 0,
+  totalSlides = 1,
+}) {
   const primaryChart = charts[0]
   const supportingCharts = charts.slice(1)
+
+  const smartLayout = getSmartLayout(slide, charts)
+
   const blockGroups = groupTextBlocks(slide.text_blocks || [])
-  const layoutConfig = getLayoutConfig(slide)
-  const layoutName = layoutConfig?.template_name || 'chart_dominant'
-  const zones = layoutConfig?.zones || {}
-  const topBlocks = [
-    ...(blockGroups['top-left'] || []),
-    ...(blockGroups['top-center'] || []),
-    ...(blockGroups['top-right'] || []),
-  ]
-  const sideBlocks = [
-    ...(blockGroups['sidebar-left'] || []),
-    ...(blockGroups['sidebar-right'] || []),
-  ]
+
   const bottomLeftBlocks = blockGroups['bottom-left'] || []
   const bottomCenterBlocks = blockGroups['bottom-center'] || []
   const bottomRightBlocks = blockGroups['bottom-right'] || []
 
-  if (zones.visual) {
-    const headlineContent = topBlocks
-    const footerContent = [...bottomLeftBlocks, ...bottomCenterBlocks, ...bottomRightBlocks]
-    const inlineSupporting = zones.insight ? [] : supportingCharts
-    const insightCharts = zones.insight ? supportingCharts : []
-    const insightBlocks = zones.insight ? sideBlocks : []
-
-    return (
-      <div className="grid h-full min-h-0 grid-cols-12 grid-rows-10 gap-4">
-        {headlineContent.length ? (
-          <div style={getZoneStyle(zones.headline)} className="grid min-h-0 auto-rows-max content-start gap-3">
-            {headlineContent.map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-headline`} block={block} />
-            ))}
-          </div>
-        ) : null}
-
-        <div style={getZoneStyle(zones.visual)} className="grid min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4">
-          <ChartPanel chart={primaryChart} isPrimary />
-          {inlineSupporting.length ? (
-            <div className="grid grid-cols-2 gap-4">
-              {inlineSupporting.map((chart, index) => (
-                <div key={`${chart.chart_type || 'support'}-${index}-visual`} className="min-h-0">
-                  <ChartPanel chart={chart} />
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {zones.insight && (insightCharts.length || insightBlocks.length) ? (
-          <div style={getZoneStyle(zones.insight)} className="grid min-h-0 content-start gap-4">
-            {insightCharts.length ? (
-              <div
-                className="grid min-h-0 gap-4"
-                style={{ gridTemplateRows: `repeat(${insightCharts.length}, minmax(180px, 1fr))` }}
-              >
-                {insightCharts.map((chart, index) => (
-                  <div key={`${chart.chart_type || 'support'}-${index}-insight`} className="min-h-0">
-                    <ChartPanel chart={chart} />
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            {insightBlocks.length ? (
-              <div className="grid auto-rows-max content-start gap-4">
-                {insightBlocks.map((block, index) => (
-                  <TextBlockCard key={`${block.role}-${index}-insight`} block={block} />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {footerContent.length ? (
-          <div
-            style={{
-              ...getZoneStyle(zones.footer),
-              gridTemplateColumns: `repeat(${Math.min(Math.max(footerContent.length, 1), 3)}, minmax(0, 1fr))`,
-            }}
-            className="grid min-h-0 items-start gap-4"
-          >
-            {footerContent.map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-footer`} block={block} />
-            ))}
-          </div>
-        ) : null}
-      </div>
-    )
-  }
-
   let visualSection
-  if (layoutName === 'split_horizontal' && supportingCharts.length > 0) {
-    visualSection = (
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ChartPanel chart={primaryChart} isPrimary />
-        <ChartPanel chart={supportingCharts[0]} />
-      </div>
+
+  if (smartLayout === 'LEFT_70') {
+    const allBlocks = [
+      ...bottomLeftBlocks,
+      ...bottomCenterBlocks,
+      ...bottomRightBlocks,
+    ]
+
+    const kpiBlocks = allBlocks.filter(
+      (b) => b.role === 'kpi_badge'
     )
-  } else if ((layoutName === 'dual_chart' || layoutName === 'evidence_grid') && supportingCharts.length > 0) {
+
+    const textBlocks = allBlocks.filter(
+      (b) => b.role !== 'kpi_badge'
+    )
+
     visualSection = (
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.18fr)_340px]">
-        <ChartPanel chart={primaryChart} isPrimary />
-        <div className="space-y-4">
-          {supportingCharts.map((chart, index) => (
-            <ChartPanel key={`${chart.chart_type || 'support'}-${index}-${chart.title || 'panel'}`} chart={chart} />
-          ))}
-          {sideBlocks.map((block, index) => (
-            <TextBlockCard key={`${block.role}-${index}-side`} block={block} />
-          ))}
+      <div className="grid h-full min-h-0 grid-cols-[70%_30%] gap-5">
+        
+        {/* LEFT 70% CHART */}
+        <div className="min-h-0 h-full overflow-hidden">
+          <ChartPanel chart={primaryChart} isPrimary />
         </div>
-      </div>
-    )
-  } else {
-    visualSection = (
-      <div className="space-y-4">
-        <ChartPanel chart={primaryChart} isPrimary />
-        {supportingCharts.length ? (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {supportingCharts.map((chart, index) => (
-              <ChartPanel key={`${chart.chart_type || 'support'}-${index}-${chart.title || 'inline'}`} chart={chart} />
+
+        {/* RIGHT 30% CONTENT */}
+        <div className="grid h-full min-h-0 grid-rows-[auto_auto_1fr] gap-4">
+
+          {/* SLIDE */}
+          <div className="rounded-[24px] border bg-white p-4">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
+              Slide
+            </p>
+            <p className="mt-1 text-lg font-semibold">
+              {String(slideIndex + 1).padStart(2, '0')} / {String(totalSlides).padStart(2, '0')}
+            </p>
+          </div>
+
+          {/* KPI */}
+          {kpiBlocks.map((block, index) => (
+            <TextBlockCard key={`kpi-${index}`} block={block} />
+          ))}
+
+          {/* TEXT BLOCKS */}
+          <div className="grid auto-rows-max content-start gap-4 overflow-hidden">
+            {textBlocks.map((block, index) => (
+              <TextBlockCard key={`text-${index}`} block={block} />
             ))}
           </div>
-        ) : null}
-        {sideBlocks.length ? (
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {sideBlocks.map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-inline`} block={block} />
-            ))}
-          </div>
-        ) : null}
+        </div>
       </div>
     )
   }
 
-  return (
-    <div className="space-y-4">
-      {topBlocks.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          {topBlocks.map((block, index) => (
-            <TextBlockCard key={`${block.role}-${index}-top`} block={block} />
+  else {
+    const allBlocks = [
+      ...bottomLeftBlocks,
+      ...bottomCenterBlocks,
+      ...bottomRightBlocks,
+    ]
+
+    const kpiBlocks = allBlocks.filter(
+      (b) => b.role === 'kpi_badge'
+    )
+
+    const textBlocks = allBlocks.filter(
+      (b) => b.role !== 'kpi_badge'
+    )
+
+    visualSection = (
+      <div className="grid h-full min-h-0 grid-rows-[70%_30%] gap-5">
+
+        {/* TOP 70% */}
+        <div className="relative min-h-0 overflow-hidden">
+
+          {/* FLOATING SLIDE + KPI */}
+          <div className="absolute top-4 right-4 z-20 w-[260px] space-y-3">
+
+            <div className="rounded-[24px] border bg-white p-4 shadow">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">
+                Slide
+              </p>
+              <p className="mt-1 text-lg font-semibold">
+                {String(slideIndex + 1).padStart(2, '0')} / {String(totalSlides).padStart(2, '0')}
+              </p>
+            </div>
+
+            {kpiBlocks.map((block, index) => (
+              <TextBlockCard key={`top-kpi-${index}`} block={block} />
+            ))}
+          </div>
+
+          <ChartPanel chart={primaryChart} isPrimary />
+        </div>
+
+        {/* BOTTOM 30% */}
+        <div
+          className="grid gap-4"
+          style={{
+            gridTemplateColumns: `repeat(${Math.min(
+              Math.max(textBlocks.length, 1),
+              3
+            )}, minmax(0, 1fr))`,
+          }}
+        >
+          {textBlocks.map((block, index) => (
+            <TextBlockCard key={`bottom-${index}`} block={block} />
           ))}
         </div>
-      ) : null}
+      </div>
+    )
+  }
 
-      {visualSection}
-
-      {bottomLeftBlocks.length || bottomCenterBlocks.length || bottomRightBlocks.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <div className="space-y-4">
-            {[...bottomLeftBlocks, ...bottomCenterBlocks].map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-bottom-left`} block={block} />
-            ))}
-          </div>
-          <div className="space-y-4">
-            {bottomRightBlocks.map((block, index) => (
-              <TextBlockCard key={`${block.role}-${index}-bottom-right`} block={block} />
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  )
+  return visualSection
 }
 
 export default function AnalyticsChartSlide({ slide, slideIndex = 0, totalSlides = 1 }) {
   const charts = Array.isArray(slide.charts) && slide.charts.length
     ? slide.charts
     : [{ ...slide, role: 'primary' }]
-  const useSidebar = charts.length > 1 || ['root_cause_story', 'risk_alert'].includes(slide.visual_intent)
+  const useSidebar = false
 
   return (
-    <SlideFrame
+    <SlideCanvas
       slideIndex={slideIndex}
       totalSlides={totalSlides}
       stage={slide.stage || 'Data Story'}
     >
-      <div className={`grid h-full min-h-0 gap-6 ${useSidebar ? 'grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-1'}`}>
-        <div className="grid min-h-0 grid-rows-[96px_minmax(0,1fr)] gap-5">
-          <SlideHeader slide={slide} chartsCount={charts.length} />
-          <StructuredCanvas slide={slide} charts={charts} />
+      <SlideFrame
+        slideIndex={slideIndex}
+        totalSlides={totalSlides}
+        stage={slide.stage || 'Data Story'}
+      >
+        <div className={`grid h-full min-h-0 gap-6 ${useSidebar ? 'grid-cols-[minmax(0,1fr)_clamp(220px,18vw,260px)]' : 'grid-cols-1'}`}>
+          <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-5">
+            <SlideHeader slide={slide} chartsCount={charts.length} />
+            <StructuredCanvas
+              slide={slide}
+              charts={charts}
+              slideIndex={slideIndex}
+              totalSlides={totalSlides}
+            />
+          </div>
+          {useSidebar ? (
+            <NarrativeSidebar slide={slide} slideIndex={slideIndex} totalSlides={totalSlides} charts={charts} />
+          ) : null}
         </div>
-        {useSidebar ? (
-          <NarrativeSidebar slide={slide} slideIndex={slideIndex} totalSlides={totalSlides} charts={charts} />
-        ) : null}
-      </div>
-    </SlideFrame>
+      </SlideFrame>
+    </SlideCanvas>
   )
 }

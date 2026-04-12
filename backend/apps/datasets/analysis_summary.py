@@ -367,7 +367,7 @@ def build_heatmap_chart(dataframe: pd.DataFrame, numeric_columns: list[str], tab
         column_name
         for column_name in candidate_columns
         if numeric_frame[column_name].notna().sum() >= 4 and numeric_frame[column_name].nunique(dropna=True) > 1
-    ][:5]
+    ][:9]
     if len(usable_columns) < 3:
         return None
 
@@ -1856,6 +1856,198 @@ def _select_supporting_charts(
 
     return deduped[:max_secondary]
 
+_BLOCK_HEIGHT_ROWS = {
+    'kpi_badge':    1,   # compacto, solo valor + label
+    'finding':      1,   # 1 fila — texto corto
+    'complication': 1,
+    'conclusion':   1,
+    'action':       1,
+    'evidence':     1,   # small, ocupa poco
+    'warning':      1,
+}
+ 
+# Para cada intent de layout, qué zonas ya están ocupadas por gráficos/headline
+# Formato: {zone_name: [col_start, row_start, col_span, row_span]}  (grid 12×10)
+# Zona libre = todo lo que NO esté en 'headline', 'visual', 'insight'
+_LAYOUT_OCCUPIED_ROWS = {
+    'situation_full':   {'headline': 2, 'visual': 4, 'insight': 2},   # footer = 2 filas
+    'hero_split':       {'headline': 2, 'visual': 6, 'insight': 0},   # footer = 2 filas
+    'chart_dominant':   {'headline': 2, 'visual': 5, 'insight': 2},   # footer = 1 fila
+    'split_horizontal': {'headline': 2, 'visual': 6, 'insight': 0},   # footer = 2 filas
+    'dual_chart':       {'headline': 2, 'visual': 6, 'insight': 0},   # footer = 2 filas
+    'evidence_grid':    {'headline': 2, 'visual': 6, 'insight': 0},   # footer = 2 filas
+}
+ 
+# Filas totales del canvas
+_CANVAS_ROWS = 10
+ 
+# Máximo de bloques por posición para evitar solapamiento
+_MAX_BLOCKS_PER_POSITION = {
+    'top-right':     1,   # solo 1 KPI badge arriba a la derecha
+    'bottom-left':   1,   # 1 hallazgo principal
+    'bottom-center': 1,
+    'bottom-right':  1,   # 1 conclusión o acción
+    'sidebar-right': 3,   # hasta 3 evidencias en sidebar
+}
+
+def _estimate_space_budget(
+    layout_template_name: str,
+    supporting_charts: list[dict],
+    has_sidebar: bool,
+) -> dict:
+    """
+    Calcula cuántas filas libres quedan en el canvas para text_blocks,
+    y qué posiciones tienen espacio disponible.
+ 
+    Retorna:
+        {
+          'free_rows': int,            # filas libres en la zona footer
+          'has_footer': bool,          # ¿hay zona footer con ≥1 fila?
+          'has_sidebar': bool,         # ¿hay zona insight libre (sin gráfico)?
+          'max_footer_blocks': int,    # cuántos bloques caben en footer
+          'max_sidebar_blocks': int,   # cuántos bloques caben en insight/sidebar
+          'positions_available': set,  # qué posiciones de texto están libres
+        }
+    """
+    occupied = _LAYOUT_OCCUPIED_ROWS.get(layout_template_name, {'headline': 2, 'visual': 5, 'insight': 2})
+    occupied_rows = sum(occupied.values())
+    free_rows = max(0, _CANVAS_ROWS - occupied_rows)
+ 
+    # Si hay gráficos de soporte en la zona insight, esa zona NO está disponible para texto
+    insight_has_chart = bool(supporting_charts)
+ 
+    # Sidebar disponible solo si la zona insight no tiene gráfico
+    sidebar_available = has_sidebar and not insight_has_chart
+ 
+    # Footer disponible si hay ≥1 fila libre
+    footer_available = free_rows >= 1
+ 
+    # Capacidad estimada: cada bloque de texto ocupa ~1 fila
+    max_footer_blocks = min(3, free_rows) if footer_available else 0
+    max_sidebar_blocks = 3 if sidebar_available else 0
+ 
+    positions = set()
+    if free_rows >= 1:
+        positions.add('top-right')      # KPI badge: siempre cabe (esquina, no ocupa fila del footer)
+    if footer_available:
+        positions.add('bottom-left')
+        positions.add('bottom-right')
+    if max_footer_blocks >= 3:
+        positions.add('bottom-center')
+    if sidebar_available:
+        positions.add('sidebar-right')
+ 
+    return {
+        'free_rows':           free_rows,
+        'has_footer':          footer_available,
+        'has_sidebar':         sidebar_available,
+        'max_footer_blocks':   max_footer_blocks,
+        'max_sidebar_blocks':  max_sidebar_blocks,
+        'positions_available': positions,
+    }
+ 
+ 
+def _build_llm_text_blocks(
+    narrative: dict,
+    table: dict,
+    space_budget: dict,
+) -> list[dict]:
+    """
+    Llama al LLM para generar texto de los text_blocks
+    condicionado al presupuesto de espacio disponible.
+    Solo se llama si ANALYTICS_USE_LLM_NARRATIVE está activo.
+    """
+    from .analysis_enrichment import (
+        ANALYTICS_USE_LLM_NARRATIVE,
+        _llm_json_response,
+    )
+ 
+    if not ANALYTICS_USE_LLM_NARRATIVE:
+        return []
+ 
+    positions = list(space_budget['positions_available'])
+    max_blocks = space_budget['max_footer_blocks'] + space_budget['max_sidebar_blocks']
+    if max_blocks == 0 or not positions:
+        return []
+ 
+    ranked_insights = (table.get('ranked_insights') or [])[:3]
+    diagnostic_chain = table.get('diagnostic_chain') or {}
+    hero_kpi = table.get('hero_kpi') or {}
+    business_context = table.get('business_context', 'negocio')
+ 
+    # Posiciones disponibles para el LLM (excluye top-right, que se maneja aparte)
+    text_positions = [p for p in positions if p != 'top-right']
+    if not text_positions:
+        return []
+ 
+    prompt = (
+        'Eres un analista de datos experto en comunicación ejecutiva. '
+        'Tu tarea es generar cuadros de texto breves para una diapositiva de analytics. '
+        'REGLAS ESTRICTAS:\n'
+        '1. Genera EXACTAMENTE los bloques que quepan en el espacio disponible (ver max_bloques).\n'
+        '2. Cada bloque debe estar DIRECTAMENTE sustentado por los insights o el grafico del slide.\n'
+        '3. Cita al menos un numero concreto de los datos en cada bloque.\n'
+        '4. NO repitas informacion que ya aparece en headline o titulo del slide.\n'
+        '5. Asigna cada bloque a una posicion disponible (ver posiciones_disponibles).\n'
+        '6. Responde SOLO JSON valido: {"blocks": [...]}.\n'
+        '   Cada elemento del array: {"role": str, "position": str, "content": str, "color_signal": str}\n'
+        '   - role: "finding" | "conclusion" | "action" | "complication" | "evidence"\n'
+        '   - position: una de las posiciones_disponibles\n'
+        '   - content: maximo 120 caracteres, tono ejecutivo, en espanol\n'
+        '   - color_signal: "positive" | "negative" | "warning" | "neutral"\n\n'
+        f'Contexto de negocio: {business_context}\n'
+        f'max_bloques: {min(max_blocks, len(text_positions))}\n'
+        f'posiciones_disponibles: {text_positions}\n'
+        f'Hallazgo principal: {narrative.get("finding", "")}\n'
+        f'Conclusion: {narrative.get("conclusion", "")}\n'
+        f'Accion recomendada: {narrative.get("action", "")}\n'
+        f'Complicacion: {narrative.get("complication", "")}\n'
+        f'Insights priorizados: {json.dumps(ranked_insights, ensure_ascii=True)}\n'
+        f'Diagnostico: {json.dumps(diagnostic_chain, ensure_ascii=True)}\n'
+        f'KPI principal: {json.dumps(hero_kpi, ensure_ascii=True)}\n'
+        'IMPORTANTE: si max_bloques es 1, genera solo el bloque mas relevante. '
+        'Si max_bloques es 0, devuelve {"blocks": []}.'
+    )
+ 
+    result = _llm_json_response(prompt)
+    if not result or not isinstance(result.get('blocks'), list):
+        return []
+ 
+    valid_positions = set(positions)
+    seen_positions = set()
+    clean_blocks = []
+ 
+    for block in result['blocks']:
+        if not isinstance(block, dict):
+            continue
+        role = str(block.get('role') or 'finding')
+        position = str(block.get('position') or 'bottom-left')
+        content = str(block.get('content') or '').strip()
+        color_signal = str(block.get('color_signal') or 'neutral')
+ 
+        # Validaciones anti-solapamiento
+        if position not in valid_positions:
+            continue
+        if position in seen_positions:
+            continue
+        if not content or len(content) > 200:
+            continue
+        if color_signal not in {'positive', 'negative', 'warning', 'neutral'}:
+            color_signal = 'neutral'
+ 
+        seen_positions.add(position)
+        clean_blocks.append({
+            'role': role,
+            'position': position,
+            'content': content,
+            'color_signal': color_signal,
+            'size': 'small' if position == 'sidebar-right' else 'normal',
+        })
+ 
+        if len(clean_blocks) >= min(max_blocks, len(text_positions)):
+            break
+ 
+    return clean_blocks
 
 def build_text_blocks_for_slide(
     narrative: dict,
@@ -1863,18 +2055,58 @@ def build_text_blocks_for_slide(
     primary_chart: dict,
     supporting_charts: list[dict],
 ) -> list[dict]:
-    del primary_chart
-    blocks = []
+    """
+    Genera los text_blocks para un slide respetando el espacio disponible.
+ 
+    Flujo:
+    1. Determina el layout template del slide para saber cuántas filas hay libres.
+    2. Calcula el presupuesto de espacio con _estimate_space_budget().
+    3. Si hay LLM activo → genera bloques con _build_llm_text_blocks().
+    4. Si no hay LLM → usa lógica determinista, pero solo emite bloques
+       para posiciones que tienen espacio disponible.
+    5. Garantiza que no haya dos bloques en la misma posición (sin solapamiento).
+    """
+    del primary_chart  # no se usa directamente aquí
+ 
     stage = narrative.get('stage', '')
     hero_kpi = table.get('hero_kpi') or {}
     signal_value = narrative.get('signal_value')
     signal_label = narrative.get('signal_label', '')
-    complication = narrative.get('complication', '')
-    conclusion = narrative.get('conclusion', '')
     metric_context = signal_label or table.get('focus_measure_column') or hero_kpi.get('label', '')
-
-    if signal_value not in (None, ''):
-        blocks.append({
+ 
+    # ── 1. Determinar el layout template para calcular el espacio ──────────────
+    layout = table.get('layout') or {}
+    layout_template = (
+        layout.get('template_name')
+        or narrative.get('layout_name')
+        or ('hero_split' if len(supporting_charts) > 1 else 'chart_dominant')
+    )
+    has_sidebar = len(supporting_charts) > 0 or stage in {'Riesgo', 'Causalidad'}
+ 
+    # ── 2. Calcular presupuesto de espacio ─────────────────────────────────────
+    budget = _estimate_space_budget(layout_template, supporting_charts, has_sidebar)
+ 
+    blocks = []
+    seen_positions = set()
+ 
+    def _add_block(block: dict) -> bool:
+        """Añade un bloque solo si su posición tiene espacio y no está ocupada."""
+        pos = block.get('position', '')
+        if pos not in budget['positions_available']:
+            return False
+        if pos in seen_positions:
+            return False
+        max_for_pos = _MAX_BLOCKS_PER_POSITION.get(pos, 1)
+        pos_count = sum(1 for b in blocks if b.get('position') == pos)
+        if pos_count >= max_for_pos:
+            return False
+        seen_positions.add(pos) if max_for_pos == 1 else None
+        blocks.append(block)
+        return True
+ 
+    # ── 3. KPI badge: siempre tiene prioridad si existe valor ─────────────────
+    if signal_value not in (None, '') and 'top-right' in budget['positions_available']:
+        _add_block({
             'role': 'kpi_badge',
             'position': 'top-right',
             'value': str(signal_value),
@@ -1883,8 +2115,8 @@ def build_text_blocks_for_slide(
             'color_signal': _resolve_signal_color(signal_value, stage, metric_context),
             'size': 'large',
         })
-    elif hero_kpi.get('value'):
-        blocks.append({
+    elif hero_kpi.get('value') and 'top-right' in budget['positions_available']:
+        _add_block({
             'role': 'kpi_badge',
             'position': 'top-right',
             'value': hero_kpi['value'],
@@ -1893,59 +2125,73 @@ def build_text_blocks_for_slide(
             'color_signal': hero_kpi.get('color_signal', 'neutral'),
             'size': 'large',
         })
-
-    finding = narrative.get('finding', '')
-    if finding:
-        blocks.append({
-            'role': 'finding',
-            'position': 'bottom-left',
-            'content': finding,
-            'color_signal': 'neutral',
-            'size': 'normal',
-        })
-
-    if supporting_charts:
-        if complication:
-            blocks.append({
+ 
+    # ── 4. Intentar generar bloques de texto con LLM ──────────────────────────
+    # Excluye top-right del budget de texto (ya lo gestionamos arriba)
+    text_budget = {
+        **budget,
+        'positions_available': budget['positions_available'] - {'top-right'},
+    }
+ 
+    llm_blocks = _build_llm_text_blocks(narrative, table, text_budget)
+ 
+    if llm_blocks:
+        # LLM generó bloques válidos → los añadimos respetando el presupuesto
+        for block in llm_blocks:
+            _add_block(block)
+    else:
+        # ── 5. Fallback determinista si LLM inactivo o falló ──────────────────
+        finding = narrative.get('finding', '')
+        complication = narrative.get('complication', '')
+        conclusion = narrative.get('conclusion', '')
+        action = narrative.get('action', '')
+        evidence = narrative.get('evidence') or []
+ 
+        if finding:
+            _add_block({
+                'role': 'finding',
+                'position': 'bottom-left',
+                'content': finding,
+                'color_signal': 'neutral',
+                'size': 'normal',
+            })
+ 
+        if supporting_charts and complication:
+            _add_block({
                 'role': 'complication',
                 'position': 'bottom-right',
                 'content': complication,
                 'color_signal': _severity_color(complication),
                 'size': 'normal',
             })
-    elif conclusion:
-        blocks.append({
-            'role': 'conclusion',
-            'position': 'bottom-right',
-            'content': conclusion,
-            'color_signal': 'neutral',
-            'size': 'normal',
-        })
-
-    evidence = narrative.get('evidence') or []
-    if stage in {'Riesgo', 'Causalidad'} and evidence:
-        for item in evidence[:3]:
-            blocks.append({
-                'role': 'evidence',
-                'position': 'sidebar-right',
-                'content': item,
+        elif conclusion:
+            _add_block({
+                'role': 'conclusion',
+                'position': 'bottom-right',
+                'content': conclusion,
                 'color_signal': 'neutral',
-                'size': 'small',
+                'size': 'normal',
             })
-
-    action = narrative.get('action', '')
-    if action and not supporting_charts and not any(
-        block.get('role') == 'action' and block.get('position') == 'bottom-right'
-        for block in blocks
-    ):
-        blocks.append({
-            'role': 'action',
-            'position': 'bottom-right',
-            'content': action,
-            'color_signal': 'neutral',
-            'size': 'normal',
-        })
-
+ 
+        if stage in {'Riesgo', 'Causalidad'} and evidence and budget['has_sidebar']:
+            for item in evidence[:budget['max_sidebar_blocks']]:
+                _add_block({
+                    'role': 'evidence',
+                    'position': 'sidebar-right',
+                    'content': item,
+                    'color_signal': 'neutral',
+                    'size': 'small',
+                })
+ 
+        if action and not any(b.get('position') == 'bottom-right' for b in blocks):
+            _add_block({
+                'role': 'action',
+                'position': 'bottom-right',
+                'content': action,
+                'color_signal': 'neutral',
+                'size': 'normal',
+            })
+ 
     return blocks
 
 
